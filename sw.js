@@ -1,5 +1,5 @@
 // sw.js
-const CACHE_NAME = "meal-planner-v10";
+const CACHE_NAME = "meal-planner-v11";
 const ASSETS = ["./", "./index.html", "./manifest.webmanifest"];
 self.addEventListener("install", e => { self.skipWaiting(); e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(ASSETS))); });
 self.addEventListener("activate", e => e.waitUntil(self.clients.claim()));
