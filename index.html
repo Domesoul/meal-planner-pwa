@@ -6,13 +6,16 @@
   <title>Family Meal Planner Chatbot</title>
   <meta name="theme-color" content="#111827">
   <link rel="manifest" href="./manifest.webmanifest">
-  <script>
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js');
-      });
-    }
-  </script>
+  <!-- index.html (inside <head> like before) -->
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      console.log('Registering SW…');
+      navigator.serviceWorker.register('./sw.js?v=3').catch(err => console.error('SW error', err));
+    });
+  }
+</script>
+
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- React 18 UMD + Babel for JSX in-browser -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
