@@ -6,52 +6,88 @@
   <title>Family Meal Planner Chatbot</title>
   <meta name="theme-color" content="#111827" />
   <link rel="manifest" href="./manifest.webmanifest" />
-
-  <!-- PWA: register service worker (cache-busted) -->
-  <script>
-    if ("serviceWorker" in navigator) {
-      window.addEventListener("load", () => {
-        console.log("[PWA] Registering SW…");
-        navigator.serviceWorker.register("./sw.js?v=6")
-          .catch(err => console.error("[PWA] SW error", err));
-      });
-    }
-  </script>
-
-  <!-- Libraries via jsDelivr (avoid adblock issues) -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script crossorigin src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
-  <script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
+  <style>
+    :root { --bg:#0b1220; --card:#fff; --ink:#0b1220; --muted:#6b7280; --border:#e5e7eb; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji"; background:#f6f7fb; color:var(--ink); }
+    header { background:var(--bg); color:#fff; padding:10px 14px; font-weight:700; }
+    .wrap{max-width:1100px;margin:0 auto;padding:16px;}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;box-shadow:0 1px 2px rgba(0,0,0,.04);}
+    .grid{display:grid;gap:16px}
+    @media(min-width:900px){ .grid{grid-template-columns: 1fr 2fr} }
+    label{font-size:12px;color:var(--muted);display:block;margin-bottom:4px}
+    input,select,button{font:inherit}
+    .inp{width:100%;border:1px solid var(--border);border-radius:10px;padding:8px 10px}
+    .btn{border:1px solid var(--border);border-radius:10px;padding:8px 12px;background:#111827;color:#fff;border-color:#111827;cursor:pointer}
+    .btn.secondary{background:#fff;color:#111827}
+    .row{display:flex;gap:8px;flex-wrap:wrap}
+    .pill{display:inline-block;padding:2px 8px;border:1px solid var(--border);border-radius:999px;background:#f3f4f6;font-size:12px}
+    .day{border:1px solid var(--border);border-radius:12px;padding:12px}
+    .debug{white-space:pre-wrap;font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace; font-size:12px; color:#b91c1c;}
+  </style>
 </head>
-<body class="bg-neutral-50 text-neutral-900">
-  <div id="root"></div>
+<body>
+  <header>🍲 Family Meal Planner Chatbot</header>
+  <div class="wrap grid">
+    <!-- LEFT: controls -->
+    <section class="card">
+      <h2 style="margin-top:0">Preferences</h2>
 
-  <!-- App -->
-  <script type="text/babel">
-    const { useState } = React;
+      <label>Family size</label>
+      <input id="family" class="inp" type="number" min="1" max="16" value="4"/>
 
-    // Small recipe set (Nigerian-friendly)
+      <div style="height:10px"></div>
+      <label>Budget per day (₦)</label>
+      <input id="budget" class="inp" type="number" min="0" value="0" placeholder="e.g., 12000"/>
+
+      <div style="height:12px"></div>
+      <div class="row">
+        <button class="btn secondary" onclick="generate(1)">Generate daily</button>
+        <button class="btn" onclick="generate(7)">Generate weekly</button>
+      </div>
+
+      <div style="height:14px"></div>
+      <h3 style="margin:0 0 6px">Chat (optional)</h3>
+      <input id="chat" class="inp" placeholder="e.g., family of 5, ₦15000 per day"
+             onkeydown="if(event.key==='Enter'){applyNLP();}"/>
+      <div style="height:6px"></div>
+      <button class="btn secondary" onclick="applyNLP()">Apply from text</button>
+
+      <p class="debug" id="debug">If you see only a white screen, scripts didn’t run. This message proves JS is running ✅</p>
+    </section>
+
+    <!-- RIGHT: plan -->
+    <section class="card">
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+        <h2 style="margin:0">Menu</h2>
+        <span id="avg" class="pill" style="display:none"></span>
+      </div>
+      <div id="plan-empty" style="color:#6b7280">Click “Generate” to build a plan.</div>
+      <div id="plan"></div>
+    </section>
+  </div>
+
+  <script>
+    // ------------------- DATA -------------------
     const R = {
       breakfast: [
-        {name:"Pap/Akamu with Milk", kcal:380, p:12,c:62,f:9, ingredients:[["pap (akamu)",2,"cup"],["milk",1,"cup"],["sugar",1,"tbsp"]], steps:["Cook pap until thick.","Serve with milk."], tags:["african","kid"]},
-        {name:"Egg Sauce & Boiled Yam", kcal:520, p:24,c:62,f:18, ingredients:[["yam",1,"small tuber"],["eggs",4,""],["tomato",3,""],["onion",1,""],["oil",1,"tbsp"]], steps:["Boil yam.","Make egg sauce with tomato & onion."], tags:["african","egg"]}
+        {name:"Pap/Akamu with Milk", kcal:380, p:12,c:62,f:9, ing:[["pap (akamu)",2,"cup"],["milk",1,"cup"],["sugar",1,"tbsp"]], steps:["Cook pap until thick.","Serve with milk."], tags:["african","kid"]},
+        {name:"Egg Sauce & Boiled Yam", kcal:520, p:24,c:62,f:18, ing:[["yam",1,"small tuber"],["eggs",4,""],["tomato",3,""],["onion",1,""],["oil",1,"tbsp"]], steps:["Boil yam.","Make egg sauce with tomato & onion."], tags:["african","egg"]}
       ],
       lunch: [
-        {name:"Jollof Rice & Grilled Fish", kcal:650,p:35,c:80,f:18, ingredients:[["rice",2,"cup"],["tomato puree",1,"cup"],["onion",1,""],["bell pepper",1,""],["tilapia",600,"g"]], steps:["Cook jollof.","Grill fish."], tags:["african","fish"]},
-        {name:"Beans (Ewa Riro) & Plantain", kcal:600,p:28,c:92,f:8, ingredients:[["brown beans",2,"cup"],["onion",1,""],["palm oil",1,"tbsp"],["ripe plantain",2,""]], steps:["Cook beans.","Bake/air-fry plantain."], tags:["african","vegan"]}
+        {name:"Jollof Rice & Grilled Fish", kcal:650,p:35,c:80,f:18, ing:[["rice",2,"cup"],["tomato puree",1,"cup"],["onion",1,""],["bell pepper",1,""],["tilapia",600,"g"]], steps:["Cook jollof.","Grill fish."], tags:["african","fish"]},
+        {name:"Beans (Ewa Riro) & Plantain", kcal:600,p:28,c:92,f:8, ing:[["brown beans",2,"cup"],["onion",1,""],["palm oil",1,"tbsp"],["ripe plantain",2,""]], steps:["Cook beans.","Bake/air-fry plantain."], tags:["african","vegan"]}
       ],
       dinner: [
-        {name:"Egusi Soup with Eba", kcal:700,p:34,c:80,f:28, ingredients:[["egusi",1.5,"cup"],["spinach",400,"g"],["palm oil",1,"tbsp"],["garri",4,"servings"]], steps:["Simmer egusi.","Add spinach.","Serve with eba."], tags:["african"]},
-        {name:"Sheet-pan Chicken & Veg", kcal:610,p:42,c:60,f:18, ingredients:[["chicken thighs",800,"g"],["potatoes",4,""],["carrot",3,""],["onion",1,""],["olive oil",2,"tbsp"]], steps:["Toss & roast 35–40 min @200°C."], tags:["halal"]}
+        {name:"Egusi Soup with Eba", kcal:700,p:34,c:80,f:28, ing:[["egusi",1.5,"cup"],["spinach",400,"g"],["palm oil",1,"tbsp"],["garri",4,"servings"]], steps:["Simmer egusi.","Add spinach.","Serve with eba."], tags:["african"]},
+        {name:"Sheet-pan Chicken & Veg", kcal:610,p:42,c:60,f:18, ing:[["chicken thighs",800,"g"],["potatoes",4,""],["carrot",3,""],["onion",1,""],["olive oil",2,"tbsp"]], steps:["Toss & roast 35–40 min @200°C."], tags:["halal"]}
       ],
       snack: [
-        {name:"Fruit Salad", kcal:180,p:3,c:42,f:1, ingredients:[["mango",1,""],["pineapple",0.5,""],["grapes",1,"cup"]], steps:["Chop fruit."], tags:["vegan"]},
-        {name:"Boli (Roasted Plantain) & Groundnuts", kcal:300,p:8,c:48,f:10, ingredients:[["ripe plantain",2,""],["peanuts",0.5,"cup"]], steps:["Roast plantain.","Serve with peanuts."], tags:["african","peanut"]}
+        {name:"Fruit Salad", kcal:180,p:3,c:42,f:1, ing:[["mango",1,""],["pineapple",0.5,""],["grapes",1,"cup"]], steps:["Chop fruit."], tags:["vegan"]},
+        {name:"Boli (Roasted Plantain) & Groundnuts", kcal:300,p:8,c:48,f:10, ing:[["ripe plantain",2,""],["peanuts",0.5,"cup"]], steps:["Roast plantain.","Serve with peanuts."], tags:["african","peanut"]}
       ]
     };
 
-    // Very rough Nigeria price table (edit in code)
+    // Rough Nigeria prices (edit as needed)
     const pricePiece = {"onion":150,"tomato":120,"ripe plantain":300,"plantain":300,"carrot":150,"yam":1500,"eggs":120,"egg":120,"mango":500,"pineapple":1200};
     const priceUnit  = {"rice|cup":250,"tomato puree|cup":300,"milk|cup":300,"pap (akamu)|cup":200,"olive oil|tbsp":120,"palm oil|tbsp":70,"garri|servings":150,"grapes|cup":800};
     const priceKg    = {"tilapia":5000,"chicken thighs":5500,"spinach":1200};
@@ -69,33 +105,33 @@
       if (u==="servings") return qty * (priceUnit[key] || 200);
       return qty * 200;
     }
-
     function costOf(recipe, familySize, type) {
-      // Recipes are 2 servings by default; snacks per person
-      const baseServes = type === "snack" ? familySize : 2;
+      const baseServes = type === "snack" ? familySize : 2; // recipes written for 2 servings
       const mult = familySize / baseServes;
-      let ngn = 0;
-      for (const [name, qty, unit] of recipe.ingredients) ngn += priceNgn(name, qty, unit);
+      let ngn = 0; for (const [name, qty, unit] of recipe.ing) ngn += priceNgn(name, qty, unit);
       return Math.round(ngn * mult);
     }
 
-    function App(){
-      const [prefs, setPrefs] = useState({familySize:4, currency:'NGN', fx:1600, budgetPerDay:0});
-      const [plan, setPlan] = useState(null);
-      const [chat, setChat] = useState("");
+    // ------------------- APP LOGIC -------------------
+    const el = (id)=>document.getElementById(id);
+    function applyNLP(){
+      try{
+        const t = el('chat').value.trim();
+        if (!t) return;
+        const fam = t.match(/family (of|size)\s*(\d+)/i) || t.match(/we (are|\'re)\s*(\d+)/i);
+        if (fam) el('family').value = parseInt(fam[2],10);
+        // ASCII-safe ₦ using \u20A6
+        const b = t.match(/(?:\u20A6|NGN|N|\$)?\s*(\d{2,6})\s*(?:per day|\/day|daily)/i);
+        if (b) el('budget').value = parseInt(b[1],10);
+        el('chat').value = "";
+        log("Applied: " + t);
+      }catch(err){ logErr(err); }
+    }
 
-      // NLP: update prefs from text (fix: ASCII-safe ₦)
-      function applyNLP(text){
-        const next = {...prefs};
-        const fam = text.match(/family (of|size)\s*(\d+)/i) || text.match(/we (are|\'re)\s*(\d+)/i);
-        if (fam) next.familySize = parseInt(fam[2],10);
-        const b = text.match(/(?:\u20A6|NGN|N|\$)?\s*(\d{2,6})\s*(?:per day|\/day|daily)/i);
-        if (b) next.budgetPerDay = parseInt(b[1],10);
-        setPrefs(next);
-      }
-
-      function generate(days=7){
-        const out = [];
+    function generate(days){
+      try{
+        const fam = Math.max(1, +el('family').value || 4);
+        const plan = [];
         for (let d=0; d<days; d++){
           const day = {
             breakfast: R.breakfast[d%R.breakfast.length],
@@ -103,98 +139,61 @@
             dinner:    R.dinner[d%R.dinner.length],
             snack:     R.snack[d%R.snack.length]
           };
-          const cost = (
-            costOf(day.breakfast, prefs.familySize, "breakfast") +
-            costOf(day.lunch,     prefs.familySize, "lunch") +
-            costOf(day.dinner,    prefs.familySize, "dinner") +
-            costOf(day.snack,     prefs.familySize, "snack")
-          );
-          out.push({ day, cost });
+          const cost = costOf(day.breakfast, fam, "breakfast")
+                     + costOf(day.lunch,     fam, "lunch")
+                     + costOf(day.dinner,    fam, "dinner")
+                     + costOf(day.snack,     fam, "snack");
+          plan.push({day, cost});
         }
-        setPlan(out);
-      }
-
-      const avg = plan && Math.round(plan.reduce((s,x)=>s+x.cost,0)/plan.length);
-
-      return (
-        <div className="max-w-6xl mx-auto p-4">
-          <header className="mb-4 flex items-center justify-between">
-            <h1 className="text-2xl font-bold">🍲 Family Meal Planner</h1>
-            <div className="text-sm text-neutral-600">Currency: NGN • FX: ₦{prefs.fx}/$</div>
-          </header>
-
-          <div className="grid md:grid-cols-3 gap-4">
-            <section className="space-y-3">
-              <div className="bg-white border rounded-2xl p-4">
-                <h2 className="font-semibold mb-2">Preferences</h2>
-                <label className="text-sm block mb-1">Family size</label>
-                <input type="number" value={prefs.familySize}
-                  onChange={e=>setPrefs({...prefs, familySize:+e.target.value})}
-                  className="w-full border rounded px-2 py-1 mb-2"/>
-
-                <label className="text-sm block mb-1">Budget / day (₦)</label>
-                <input type="number" value={prefs.budgetPerDay}
-                  onChange={e=>setPrefs({...prefs, budgetPerDay:+e.target.value})}
-                  className="w-full border rounded px-2 py-1 mb-3"/>
-
-                <div className="flex gap-2">
-                  <button className="px-3 py-1.5 border rounded" onClick={()=>generate(1)}>Generate daily</button>
-                  <button className="px-3 py-1.5 border rounded bg-neutral-900 text-white" onClick={()=>generate(7)}>Generate weekly</button>
-                </div>
-              </div>
-
-              <div className="bg-white border rounded-2xl p-4">
-                <h3 className="font-semibold mb-2">Chat (optional)</h3>
-                <input placeholder="e.g., family of 5, ₦15000 per day"
-                  value={chat} onChange={e=>setChat(e.target.value)}
-                  onKeyDown={e=>{if(e.key==='Enter'){applyNLP(chat); setChat('');}}}
-                  className="w-full border rounded px-2 py-1 mb-2"/>
-                <button className="px-3 py-1.5 border rounded" onClick={()=>{applyNLP(chat); setChat('');}}>Apply</button>
-                <p className="text-xs text-neutral-500 mt-2">Tip: I understand “family of 6” and “₦12000 per day”.</p>
-              </div>
-            </section>
-
-            <section className="md:col-span-2 space-y-4">
-              <div className="bg-white border rounded-2xl p-4">
-                <div className="flex items-center justify-between">
-                  <h2 className="font-semibold">Menu</h2>
-                  {plan && <span className="text-sm">Avg est. cost/day: ₦{avg?.toLocaleString()}</span>}
-                </div>
-
-                {!plan && <p className="text-sm text-neutral-600 mt-2">Click Generate to build a plan.</p>}
-
-                {plan && (
-                  <div className="mt-3 space-y-4">
-                    {plan.map((p, i)=>(
-                      <div key={i} className="border rounded-xl p-3">
-                        <div className="flex items-center justify-between mb-2">
-                          <h3 className="font-semibold">Day {i+1}</h3>
-                          <span className="text-sm bg-neutral-100 border rounded px-2 py-0.5">~ ₦{p.cost.toLocaleString()}</span>
-                        </div>
-                        <ul className="grid sm:grid-cols-2 gap-2 text-sm">
-                          {["breakfast","lunch","dinner","snack"].map(t=>(
-                            <li key={t} className="border rounded p-2">
-                              <div className="font-medium capitalize">{t}</div>
-                              <div>{p.day[t].name}</div>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </section>
-          </div>
-
-          <footer className="text-xs text-neutral-500 mt-6">
-            If you ever see a blank screen, hard refresh or bump the SW query (?v=6) in index.html.
-          </footer>
-        </div>
-      );
+        render(plan, fam);
+      }catch(err){ logErr(err); }
     }
 
-    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+    function render(plan, fam){
+      const host = el('plan');
+      el('plan-empty').style.display = "none";
+      host.innerHTML = "";
+      let total = 0;
+      plan.forEach((p, i)=>{
+        total += p.cost;
+        const div = document.createElement('div'); div.className = "day";
+        div.innerHTML = `
+          <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px">
+            <h3 style="margin:0">Day ${i+1}</h3>
+            <span class="pill">~ ₦${p.cost.toLocaleString()}</span>
+          </div>
+          <ul style="list-style:none;padding:0;margin:0;display:grid;gap:8px;grid-template-columns: repeat(auto-fit,minmax(220px,1fr))">
+            ${["breakfast","lunch","dinner","snack"].map(t => `
+              <li class="card" style="padding:10px">
+                <div style="font-size:12px;color:#6b7280;text-transform:uppercase">${t}</div>
+                <div style="font-weight:600">${p.day[t].name}</div>
+              </li>
+            `).join("")}
+          </ul>`;
+        host.appendChild(div);
+      });
+      const avg = Math.round(total / plan.length);
+      const avgEl = el('avg'); avgEl.style.display = "inline-block"; avgEl.textContent = `Avg est. cost/day: ₦${avg.toLocaleString()}`;
+      log(`Generated ${plan.length} day(s) for family of ${fam}.`);
+    }
+
+    // ------------------- DEBUG -------------------
+    function log(msg){ el('debug').textContent = msg; }
+    function logErr(err){ el('debug').textContent = "Error: " + (err && err.message ? err.message : err); }
+
+    window.onerror = function(message, source, lineno, colno, error){
+      logErr(message + " @" + lineno + ":" + colno);
+    };
+
+    // ------------------- PWA (safe) -------------------
+    // You can comment this out while testing
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js?v=7')
+          .then(()=>log("Service worker registered."))
+          .catch(err=>logErr("SW: " + err));
+      });
+    }
   </script>
 </body>
 </html>
