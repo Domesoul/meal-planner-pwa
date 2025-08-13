@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Family Meal Planner Chatbot</title>
+  <meta name="theme-color" content="#111827">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js');
+      });
+    }
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React 18 UMD + Babel for JSX in-browser -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="bg-neutral-50 text-neutral-900">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useEffect, useState } = React;
+
+    function FamilyMealPlannerChatbot() {
+      // ---------- Helpers ----------
+      function ing(name, qty, unit) { return { name, qty, unit }; }
+      function meal(name, type, kcal, p, c, f, ingredients, steps, tags = [], keywords = []) {
+        return { id: slug(name + "_" + type), name, type, kcal, protein: p, carbs: c, fat: f, ingredients, steps, tags, keywords };
+      }
+      function slug(s) { return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""); }
+      function uniq(arr) { return Array.from(new Set(arr)); }
+      function title(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+      function splitItems(s) { return s.split(/,| and /i).map(x => x.trim()).filter(Boolean); }
+
+      // ---------- Recipe DB (added Nigerian dishes) ----------
+      const RECIPES = [
+        // BREAKFAST
+        meal("Oatmeal with Banana & Peanut Butter", "breakfast", 450, 14, 60, 16,
+          [ing("rolled oats",1,"cup"), ing("banana",1,""), ing("peanut butter",2,"tbsp"), ing("milk",1,"cup"), ing("cinnamon",0.5,"tsp")],
+          ["Simmer oats in milk 5–7 min.","Top with banana, peanut butter & cinnamon."],
+          ["contains_peanut","vegetarian","quick","kid_friendly"], ["oats","banana","peanut"]
+        ),
+        meal("Greek Yogurt Parfait", "breakfast", 380, 22, 48, 10,
+          [ing("Greek yogurt",2,"cup"), ing("berries (mixed)",1,"cup"), ing("granola",0.75,"cup"), ing("honey",1,"tbsp")],
+          ["Layer yogurt, berries, granola.","Drizzle honey."],
+          ["contains_dairy","contains_gluten","vegetarian","quick","kid_friendly"], ["yogurt","granola"]
+        ),
+        meal("Nigerian Egg Sauce & Boiled Yam", "breakfast", 520, 24, 62, 18,
+          [ing("yam",1,"small tuber"), ing("eggs",4,""), ing("tomato",3,""), ing("onion",1,""), ing("oil",1,"tbsp")],
+          ["Boil yam chunks 15–20 min.","Scramble eggs with sautéed tomato & onion."],
+          ["contains_egg","african","kid_friendly","halal_friendly"], ["yam","egg","tomato"]
+        ),
+        meal("Pap/Akamu with Milk", "breakfast", 380, 12, 62, 9,
+          [ing("pap (akamu)",2,"cup"), ing("milk",1,"cup"), ing("sugar",1,"tbsp")],
+          ["Cook pap to thicken, sweeten to taste.","Serve with milk."],
+          ["african","vegetarian","gluten_free","kid_friendly"], ["pap","akamu","millet"]
+        ),
+        meal("Avocado Toast with Egg", "breakfast", 420, 16, 40, 22,
+          [ing("avocado",1,""), ing("eggs",4,""), ing("whole‑grain bread",4,"slices"), ing("lemon",0.5,"")],
+          ["Mash avocado with lemon & salt.","Toast bread, top with egg."],
+          ["contains_gluten","contains_egg","vegetarian","quick","kid_friendly"], ["avocado","egg","bread"]
+        ),
+
+        // LUNCH
+        meal("Jollof Rice with Grilled Fish & Slaw", "lunch", 650, 35, 80, 18,
+          [ing("rice",2,"cup"), ing("tomato puree",1,"cup"), ing("onion",1,""), ing("bell pepper",1,""), ing("tilapia",600,"g"), ing("cabbage",0.5,"head"), ing("carrot",2,"")],
+          ["Cook jollof base & rice 25–30 min.","Grill fish 3–4 min/side.","Shred cabbage & carrot for slaw."],
+          ["fish","african","halal_friendly","kid_friendly"], ["rice","fish","tomato"]
+        ),
+        meal("Ewa Riro (Beans Porridge) & Plantain", "lunch", 600, 28, 92, 8,
+          [ing("brown beans",2,"cup"), ing("onion",1,""), ing("palm oil",1,"tbsp"), ing("ripe plantain",2,"")],
+          ["Boil beans till soft; season & mash lightly.","Bake or pan‑cook plantain slices."],
+          ["vegan","african","budget","kid_friendly"], ["beans","plantain"]
+        ),
+        meal("Chickpea Salad Wrap", "lunch", 520, 18, 64, 18,
+          [ing("whole‑wheat wraps",4,""), ing("chickpeas (cooked)",2,"cup"), ing("cucumber",1,""), ing("tomato",2,""), ing("yogurt",3,"tbsp")],
+          ["Mash chickpeas lightly.","Mix veg & yogurt.","Fill wraps."],
+          ["vegetarian","contains_gluten","quick","budget"], ["wrap","chickpea"]
+        ),
+        meal("Moi‑Moi (Bean Pudding) & Salad", "lunch", 540, 28, 68, 16,
+          [ing("brown beans",2,"cup"), ing("onion",1,""), ing("oil",1,"tbsp"), ing("egg (optional)",2,""), ing("lettuce",1,"head"), ing("tomato",2,"")],
+          ["Blend soaked, peeled beans with onion & seasoning; steam till set.","Serve with simple salad."],
+          ["african","halal_friendly","contains_egg_optional","gluten_free"], ["moi-moi","beans"]
+        ),
+        meal("Okra Soup with Fish & Garri", "lunch", 620, 34, 70, 20,
+          [ing("okra",600,"g"), ing("tilapia",500,"g"), ing("onion",1,""), ing("palm oil",1,"tbsp"), ing("garri",4,"servings")],
+          ["Simmer okra with aromatics; add fish to cook through.","Serve with garri."],
+          ["fish","african","halal_friendly"], ["okra","fish","garri"]
+        ),
+
+        // DINNER
+        meal("Egusi Soup with Eba (Garri)", "dinner", 700, 34, 80, 28,
+          [ing("egusi (melon seed)",1.5,"cup"), ing("spinach",400,"g"), ing("palm oil",1,"tbsp"), ing("tilapia (optional)",300,"g"), ing("garri",4,"servings")],
+          ["Toast egusi paste briefly; add water/stock and simmer.","Stir in spinach; add fish last 6–8 min.","Serve with eba/garri."],
+          ["african","halal_friendly","fish_optional","gluten_free"], ["egusi","spinach","garri"]
+        ),
+        meal("Ofada Rice & Ayamase (Green Pepper Stew)", "dinner", 720, 38, 92, 22,
+          [ing("ofada rice (or brown rice)",2,"cup"), ing("beef strips",500,"g"), ing("green bell pepper",4,""), ing("onion",1,""), ing("palm oil",2,"tbsp"), ing("eggs (optional)",2,"")],
+          ["Boil rice.","Blend peppers & onion; fry in palm oil till reduced.","Add beef; simmer. Eggs optional."],
+          ["african","halal_friendly","spicy","contains_egg_optional"], ["ofada","ayamase","beef"]
+        ),
+        meal("Sheet‑pan Chicken & Vegetables", "dinner", 610, 42, 60, 18,
+          [ing("chicken thighs",800,"g"), ing("potatoes",4,""), ing("carrot",3,""), ing("onion",1,""), ing("olive oil",2,"tbsp")],
+          ["Toss all with oil & seasoning.","Roast 35–40 min @200°C."],
+          ["gluten_free","halal_friendly","kid_friendly"], ["chicken","potato","carrot"]
+        ),
+        meal("Tilapia Pepper Soup with Yam", "dinner", 560, 36, 60, 14,
+          [ing("tilapia",600,"g"), ing("yam",1,"small tuber"), ing("onion",1,""), ing("pepper soup spice",1,"tbsp")],
+          ["Boil spice broth; add fish to poach.","Serve with boiled yam."],
+          ["fish","african","halal_friendly"], ["pepper soup","tilapia","yam"]
+        ),
+        meal("Veggie Couscous & Chickpeas", "dinner", 580, 18, 92, 10,
+          [ing("couscous",2,"cup"), ing("chickpeas",2,"cup"), ing("zucchini",2,""), ing("bell pepper",1,""), ing("raisins",0.25,"cup")],
+          ["Steam couscous.","Sauté veg 6–8 min.","Fold in chickpeas & raisins."],
+          ["vegetarian","contains_gluten","budget","kid_friendly"], ["couscous","chickpea"]
+        ),
+
+        // SNACKS
+        meal("Fruit Salad", "snack", 180, 3, 42, 1,
+          [ing("mango",1,""), ing("pineapple",0.5,""), ing("grapes",1,"cup"), ing("lime",1,"")],
+          ["Chop fruit; squeeze lime."],
+          ["vegan","gluten_free","quick","kid_friendly"], ["fruit"]
+        ),
+        meal("Hummus & Carrots", "snack", 220, 8, 28, 8,
+          [ing("hummus",0.75,"cup"), ing("carrot",4,"")],
+          ["Dip & enjoy."],
+          ["vegan","gluten_free","quick","budget"], ["carrot","hummus"]
+        ),
+        meal("Boiled Eggs", "snack", 160, 14, 2, 10,
+          [ ing("eggs",4,"") ],
+          ["Boil 8–10 min; peel."],
+          ["contains_egg","gluten_free","quick","budget","kid_friendly"], ["egg"]
+        ),
+        meal("Boli (Roasted Plantain) & Groundnuts", "snack", 300, 8, 48, 10,
+          [ ing("ripe plantain",2,""), ing("peanuts",0.5,"cup") ],
+          ["Roast/air‑fry plantain till caramelized.","Serve with peanuts."],
+          ["african","contains_peanut","quick"], ["plantain","peanut"]
+        ),
+        meal("Beans & Garri (quick)", "snack", 320, 14, 50, 6,
+          [ ing("brown beans (cooked)",1,"cup"), ing("garri",1,"servings") ],
+          ["Spoon cooked beans; add garri + water to your texture."],
+          ["vegan","african","budget","kid_friendly"], ["beans","garri"]
+        ),
+      ];
+
+      // ---------- Price tables (NGN, editable) ----------
+      const DEFAULTS = {
+        fxNgnPerUsd: 1600,          // editable exchange rate
+        fallback: { perCup: 300, perPiece: 200, perKg: 6000, perTbsp: 80 }
+      };
+      // per piece
+      const pricePiece = {
+        "banana": 150, "avocado": 700, "egg": 120, "eggs": 120, "onion": 150, "tomato": 120,
+        "bell pepper": 200, "green bell pepper": 200, "lemon": 200, "ripe plantain": 300, "plantain": 300,
+        "cucumber": 300, "zucchini": 400, "mango": 500, "lime": 120, "carrot": 150,
+        "yam": 1500, "egg (optional)": 120, "eggs (optional)": 120, "tilapia (optional)": 0
+      };
+      // unit-specific (name|unit)
+      const priceUnit = {
+        "Greek yogurt|cup": 500, "yogurt|cup": 400, "granola|cup": 450, "berries (mixed)|cup": 700,
+        "rolled oats|cup": 250, "oats|cup": 250, "milk|cup": 300, "pap (akamu)|cup": 200,
+        "peanut butter|tbsp": 120, "olive oil|tbsp": 120, "oil|tbsp": 50, "palm oil|tbsp": 70,
+        "garri|servings": 150, "fufu|servings": 200,
+        "rice|cup": 250, "brown rice|cup": 300, "ofada rice (or brown rice)|cup": 300,
+        "tomato puree|cup": 300, "couscous|cup": 300, "chickpeas (cooked)|cup": 250, "chickpeas|cup": 250,
+        "brown beans|cup": 220, "brown beans (cooked)|cup": 220, "lentils|cup": 350, "quinoa|cup": 1200,
+        "hummus|cup": 700, "raisins|cup": 900, "grapes|cup": 800, "mixed greens|cup": 200,
+        "whole‑grain bread|slices": 60
+      };
+      // per kg (name-> NGN/kg)
+      const priceKg = {
+        "chicken thighs": 5500, "chicken breast": 6000, "beef strips": 7000, "tilapia": 5000, "mackerel": 4500,
+        "spinach": 1200, "broccoli": 2000, "okra": 800
+      };
+      // heads
+      const priceHead = { "cabbage": 800, "broccoli": 1000, "lettuce": 700 };
+      // special units
+      const priceSpecial = { "yam|small tuber": 1500, "coconut milk|can": 1200, "tuna|can": 1200 };
+
+      // aliases (normalize to canonical keys)
+      const alias = {
+        "ripe plantain": "plantain",
+        "long‑grain rice": "rice", "brown rice": "brown rice",
+        "milk (or plant milk)": "milk", "oat milk": "milk",
+        "groundnuts/peanuts": "peanuts",
+        "white fish": "tilapia",
+        "fish fillets (tilapia)": "tilapia",
+        "tilapia (optional)": "tilapia",
+        "eggs (optional)": "eggs",
+        "egg (optional)": "egg",
+        "green bell pepper": "green bell pepper",
+        "bell pepper": "bell pepper",
+        "pap/akamu": "pap (akamu)"
+      };
+
+      function normalizeName(n) {
+        return (alias[n] || n).toLowerCase();
+      }
+
+      function priceNgnForItem(name, qty, unit) {
+        const n = normalizeName(name);
+        const u = (unit || "").toLowerCase();
+
+        // exact unit price (name|unit)
+        const key = n + "|" + u;
+        if (priceUnit[key] !== undefined) return qty * priceUnit[key];
+
+        // special unit entries (e.g., yam|small tuber)
+        if (priceSpecial[key] !== undefined) return qty * priceSpecial[key];
+
+        // piece items (empty unit means piece)
+        if (!u || u === "piece") {
+          if (pricePiece[n] !== undefined) return qty * pricePiece[n];
+        }
+
+        // heads
+        if (u === "head" && priceHead[n] !== undefined) return qty * priceHead[n];
+
+        // grams/kilograms
+        if (u === "g" || u === "kg") {
+          const perKg = priceKg[n] !== undefined ? priceKg[n] : DEFAULTS.fallback.perKg;
+          const kg = u === "kg" ? qty : qty / 1000;
+          return kg * perKg;
+        }
+
+        // tablespoons
+        if (u === "tbsp") {
+          const perTbsp = priceUnit[n+"|tbsp"] !== undefined ? priceUnit[n+"|tbsp"] : DEFAULTS.fallback.perTbsp;
+          return qty * perTbsp;
+        }
+
+        // cups
+        if (u === "cup" || u === "cups") {
+          const perCup = priceUnit[n+"|cup"] !== undefined ? priceUnit[n+"|cup"] : DEFAULTS.fallback.perCup;
+          return qty * perCup;
+        }
+
+        // slices, servings
+        if (u === "slices" || u === "servings") {
+          const perUnit = priceUnit[key] !== undefined ? priceUnit[key] : DEFAULTS.fallback.perPiece;
+          return qty * perUnit;
+        }
+
+        // fallback per piece
+        return qty * DEFAULTS.fallback.perPiece;
+      }
+
+      function ngnToDisplay(ngn, fx) {
+        return "₦" + Math.round(ngn).toLocaleString();
+      }
+      function ngnToUsd(ngn, fx) {
+        return (ngn / fx);
+      }
+
+      // ---------- State ----------
+      const initialPrefs = {
+        familySize: 4,
+        diet: "omnivore",
+        halal: true,
+        kidFriendly: true,
+        africanFocus: true,
+        spice: "mild",
+        allergies: [],
+        dislikes: [],
+        timePerMeal: 30,
+        currency: "NGN",
+        fxNgnPerUsd: DEFAULTS.fxNgnPerUsd,
+        budgetPerDay: 0 // in selected currency
+      };
+
+      const [prefs, setPrefs] = useState(() => {
+        const saved = localStorage.getItem("mealbot:prefs.v3");
+        return saved ? JSON.parse(saved) : initialPrefs;
+      });
+      const [messages, setMessages] = useState([
+        { role: "assistant", text: "Hi! I’m your Meal Planner 🍽️\\nNow with Nigerian dishes, ₦ budgeting, and installable PWA. Set your preferences & generate a plan."}
+      ]);
+      const [input, setInput] = useState("");
+      const [weekPlan, setWeekPlan] = useState(() => {
+        const saved = localStorage.getItem("mealbot:weekPlan.v3");
+        return saved ? JSON.parse(saved) : null;
+      });
+      const [view, setView] = useState("plan");
+      const [daysCount, setDaysCount] = useState(7);
+
+      useEffect(() => localStorage.setItem("mealbot:prefs.v3", JSON.stringify(prefs)), [prefs]);
+      useEffect(() => localStorage.setItem("mealbot:weekPlan.v3", JSON.stringify(weekPlan)), [weekPlan]);
+
+      // ---------- Chat parsing ----------
+      function pushMsg(role, text) { setMessages(m => [...m, { role, text }]); }
+      function handleSend() {
+        if (!input.trim()) return;
+        const userText = input.trim();
+        pushMsg("user", userText);
+        const updated = applyNLP(userText, prefs);
+        setPrefs(updated);
+        const reply = summarizePrefs(updated);
+        pushMsg("assistant", reply + "\\nReady to generate a plan? Use the buttons above the chat.");
+        setInput("");
+      }
+      function applyNLP(text, p) {
+        let next = { ...p };
+        const familyRegex = /(family (of|size)\\s*(\\d+))|we (are|\\'re)\\s*(\\d+)/i;
+        const fam = text.match(familyRegex);
+        if (fam) {
+          const num = parseInt(fam[3] || fam[6], 10);
+          if (!isNaN(num) && num > 0 && num < 20) next.familySize = num;
+        }
+        const diets = ["vegan","vegetarian","pescatarian","omnivore"];
+        for (const d of diets) if (new RegExp("\\\\b"+d+"s?\\\\b","i").test(text)) next.diet = d;
+        if (/halal/i.test(text)) next.halal = true;
+        if (/kid(-| )?friendly|children|kids?/i.test(text)) next.kidFriendly = true;
+        if (/african|nigerian|west\\s*africa/i.test(text)) next.africanFocus = true;
+        const allergyMap = { peanut:/peanut|groundnut/i, nuts:/nuts?/i, gluten:/gluten|wheat/i, dairy:/dairy|milk|cheese|yogurt/i, egg:/egg/i, shellfish:/shellfish|shrimp|prawn|crab/i };
+        next.allergies = Object.entries(allergyMap).filter(([k,re]) => re.test(text)).map(([k]) => k);
+        const dis = text.match(/(don\\'t like|no|avoid) ([a-z ,]+)/i);
+        if (dis && dis[2]) next.dislikes = uniq(next.dislikes.concat(splitItems(dis[2])));
+        const t = text.match(/(\\d{2,3}) ?min/i);
+        if (t) {
+          const mins = parseInt(t[1], 10);
+          if (!isNaN(mins) && mins >= 10 && mins <= 120) next.timePerMeal = mins;
+        }
+        const b = text.match(/(₦|N|NGN|\\$)?\\s*(\\d{2,6}) ?(per day|\\/day|daily)/i);
+        if (b) next.budgetPerDay = parseInt(b[2], 10);
+        const spice = text.match(/(mild|medium|hot) spice/i);
+        if (spice) next.spice = spice[1];
+        return next;
+      }
+      function summarizePrefs(p) {
+        const parts = [
+          \`Family size: \${p.familySize}\`,
+          \`Diet: \${title(p.diet)}\`,
+          p.halal ? "Halal-friendly" : null,
+          p.kidFriendly ? "Kid-friendly" : null,
+          p.africanFocus ? "African focus" : null,
+          p.allergies.length ? \`Allergies: \${p.allergies.join(", ")}\` : null,
+          p.dislikes.length ? \`Dislikes: \${p.dislikes.join(", ")}\` : null,
+          \`Time per meal ≤ \${p.timePerMeal} min\`,
+          p.budgetPerDay ? \`Budget/day: \${p.currency==='NGN' ? '₦'+p.budgetPerDay : '$'+p.budgetPerDay}\` : null,
+        ].filter(Boolean);
+        return "Got it. " + parts.join(" • ");
+      }
+
+      // ---------- Planning + Costing ----------
+      function generatePlan(days = 7) {
+        const plan = [];
+        const used = new Set();
+        for (let d = 0; d < days; d++) {
+          const day = { dayIndex: d, meals: {} };
+          ["breakfast","lunch","dinner","snack"].forEach(type => {
+            let options = filterRecipes(RECIPES, type, prefs).filter(r => !used.has(r.id));
+            if (!options.length) options = filterRecipes(RECIPES, type, {...prefs, africanFocus:false, kidFriendly:false});
+            const pick = pickBest(options, prefs);
+            used.add(pick.id);
+            day.meals[type] = pick;
+          });
+          day.totals = calcTotals(day.meals);
+          day.costNgn = calcDayCostNgn(day.meals, prefs.familySize);
+          plan.push(day);
+        }
+        setWeekPlan(plan);
+        setView("plan");
+        pushMsg("assistant", days === 1 ? "Here is a fresh daily menu with snack ✨" : "Your 7‑day family menu is ready! 🗓️✨");
+      }
+
+      function pickBest(options, p) {
+        if (!options.length) return options[0];
+        const scored = options.map(r => {
+          let score = 0;
+          if (p.africanFocus && r.tags.includes("african")) score += 2;
+          if (p.kidFriendly && r.tags.includes("kid_friendly")) score += 1.2;
+          if (p.spice === "mild" && r.tags.includes("spicy")) score -= 0.6;
+          if (p.spice === "hot" && r.tags.includes("spicy")) score += 0.3;
+          const est = estimateTime(r);
+          if (est <= p.timePerMeal) score += (p.timePerMeal - est) / 60;
+          // crude cost bias: prefer cheaper by estimating cost quickly
+          const cost = estimateRecipeCostNgn(r, 2); // recipe serves ~2
+          const bias = p.budgetPerDay ? (8000 - cost) * 0.0002 : 0; // small nudge
+          score += bias;
+          return { r, score };
+        }).sort((a,b)=> b.score - a.score);
+        return scored[0].r;
+      }
+
+      function filterRecipes(db, type, p) {
+        return db.filter(r => r.type === type)
+          .filter(r => dietPass(r, p.diet))
+          .filter(r => halalPass(r, p.halal))
+          .filter(r => allergyPass(r, p.allergies))
+          .filter(r => dislikePass(r, p.dislikes))
+          .filter(r => timePass(r, p.timePerMeal));
+      }
+      function dietPass(r, diet) {
+        if (diet === "omnivore") return true;
+        const isVeg = r.tags.includes("vegetarian") || r.tags.includes("vegan");
+        const isVegan = r.tags.includes("vegan");
+        const hasFish = r.tags.includes("fish") || r.tags.includes("fish_optional");
+        const hasMeat = /(chicken|beef|turkey)/i.test((r.keywords||[]).join(" ") + " " + r.name);
+        if (diet === "vegetarian") return isVeg;
+        if (diet === "vegan") return isVegan;
+        if (diet === "pescatarian") return !hasMeat && (isVeg || hasFish);
+        return true;
+      }
+      function halalPass(r, halal) {
+        if (!halal) return true;
+        const bad = r.tags.includes("non_halal") || /pork|bacon|wine|beer/i.test(r.name + " " + (r.ingredients||[]).map(i=>i.name).join(" "));
+        return !bad;
+      }
+      function allergyPass(r, allergies) {
+        const tagBlock = [];
+        if (allergies.includes("peanut")) tagBlock.push("contains_peanut");
+        if (allergies.includes("nuts")) tagBlock.push("contains_nuts");
+        if (allergies.includes("gluten")) tagBlock.push("contains_gluten");
+        if (allergies.includes("dairy")) tagBlock.push("contains_dairy");
+        if (allergies.includes("egg")) tagBlock.push("contains_egg");
+        if (allergies.includes("shellfish")) tagBlock.push("shellfish");
+        return !r.tags.some(t => tagBlock.includes(t));
+      }
+      function dislikePass(r, dislikes) {
+        if (!dislikes || !dislikes.length) return true;
+        const hay = (r.name + " " + (r.keywords||[]).join(" ") + " " + r.ingredients.map(i=>i.name).join(" ")).toLowerCase();
+        return !dislikes.some(d => hay.includes(d.toLowerCase()));
+      }
+      function estimateTime(r) {
+        const quick = r.tags.includes("quick");
+        const long = /roast|bake|couscous|stew|soup|rice/.test(r.steps.join(" ").toLowerCase());
+        return quick ? 15 : long ? 40 : 25;
+      }
+      function timePass(r, maxMins) { return estimateTime(r) <= maxMins; }
+      function calcTotals(meals) {
+        const keys = Object.keys(meals);
+        return keys.reduce((acc, k) => {
+          const r = meals[k];
+          acc.kcal += r.kcal; acc.p += r.protein; acc.c += r.carbs; acc.f += r.fat;
+          return acc;
+        }, { kcal:0, p:0, c:0, f:0 });
+      }
+      function portionMultiplier(type, fam) {
+        const baseServes = type === "snack" ? fam : 2;
+        return fam / baseServes;
+      }
+      function estimateRecipeCostNgn(recipe, serves) {
+        let sum = 0;
+        for (const it of recipe.ingredients) {
+          sum += priceNgnForItem(it.name, it.qty || 0, it.unit || "");
+        }
+        return sum; // per ~recipe serves 2
+      }
+      function calcDayCostNgn(meals, fam) {
+        let ngn = 0;
+        for (const [type, r] of Object.entries(meals)) {
+          const base = estimateRecipeCostNgn(r, 2);
+          const mult = portionMultiplier(type, fam);
+          ngn += base * mult;
+        }
+        return Math.round(ngn);
+      }
+
+      function buildShoppingList(plan) {
+        if (!plan) return [];
+        const fam = Math.max(1, prefs.familySize);
+        const bag = {};
+        for (const day of plan) {
+          for (const type of Object.keys(day.meals)) {
+            const r = day.meals[type];
+            for (const it of r.ingredients) {
+              const key = (normalizeName(it.name) + "|" + (it.unit||"")).toLowerCase();
+              const mult = portionMultiplier(type, fam);
+              if (!bag[key]) bag[key] = { name: normalizeName(it.name), qty: 0, unit: it.unit || "" };
+              bag[key].qty += (it.qty || 0) * mult;
+            }
+          }
+        }
+        for (const k of Object.keys(bag)) bag[k].qty = Math.round(bag[k].qty * 10) / 10;
+        return Object.values(bag).sort((a,b)=>a.name.localeCompare(b.name));
+      }
+      function downloadList(list) {
+        const lines = ["Family Shopping List", \`Family size: \${prefs.familySize}\`, "", ...list.map(i => \`• \${i.name} — \${i.qty} \${i.unit}\`)];
+        const blob = new Blob([lines.join("\\n")], { type: "text/plain" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = "shopping-list.txt"; a.click();
+        URL.revokeObjectURL(url);
+      }
+
+      const planTotals = weekPlan ? weekPlan.reduce((acc, d) => {
+        acc.kcal += d.totals.kcal; acc.p += d.totals.p; acc.c += d.totals.c; acc.f += d.totals.f;
+        return acc;
+      }, {kcal:0,p:0,c:0,f:0}) : null;
+      const avgDayCostNgn = weekPlan && weekPlan.length ? Math.round(weekPlan.reduce((s,d)=>s+d.costNgn,0)/weekPlan.length) : null;
+      const list = buildShoppingList(weekPlan || []);
+      const overBudget = prefs.budgetPerDay && prefs.currency==='NGN' && avgDayCostNgn && avgDayCostNgn > prefs.budgetPerDay;
+      const overBudgetUsd = prefs.budgetPerDay && prefs.currency==='USD' && avgDayCostNgn && (avgDayCostNgn/prefs.fxNgnPerUsd) > prefs.budgetPerDay;
+
+      // ---------- UI ----------
+      return (
+        <div className="min-h-screen">
+          <header className="sticky top-0 z-10 bg-white/80 backdrop-blur border-b border-neutral-200">
+            <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+              <h1 className="text-2xl font-bold">🍲 Family Meal Planner Chatbot</h1>
+              <div className="flex items-center gap-2">
+                <button className={tabBtn(view==='chat')} onClick={()=>setView("chat")}>Chat</button>
+                <button className={tabBtn(view==='plan')} onClick={()=>setView("plan")}>Plan</button>
+              </div>
+            </div>
+          </header>
+
+          <main className="max-w-6xl mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Left: Controls & Chat */}
+            <section className="lg:col-span-1 space-y-4">
+              <Card>
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-lg font-semibold">Preferences</h2>
+                  <button className="text-sm underline" onClick={()=>{ setPrefs(initialPrefs); pushMsg("assistant","Preferences reset. Tell me anything special and regenerate."); }}>Reset</button>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="lbl">Family size</label>
+                    <input type="number" min="1" max="16" value={prefs.familySize} onChange={e=>setPrefs({...prefs, familySize: +e.target.value})} className="inp"/>
+                  </div>
+                  <div>
+                    <label className="lbl">Diet</label>
+                    <select value={prefs.diet} onChange={e=>setPrefs({...prefs, diet: e.target.value})} className="inp">
+                      <option>omnivore</option>
+                      <option>pescatarian</option>
+                      <option>vegetarian</option>
+                      <option>vegan</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="lbl">Halal-friendly</label>
+                    <Toggle checked={prefs.halal} onChange={v=>setPrefs({...prefs, halal:v})} />
+                  </div>
+                  <div>
+                    <label className="lbl">Kid-friendly</label>
+                    <Toggle checked={prefs.kidFriendly} onChange={v=>setPrefs({...prefs, kidFriendly:v})} />
+                  </div>
+                  
+                  <div>
+                    <label className="lbl">African focus</label>
+                    <Toggle checked={prefs.africanFocus} onChange={v=>setPrefs({...prefs, africanFocus:v})} />
+                  </div>
+                  <div>
+                    <label className="lbl">Spice level</label>
+                    <select value={prefs.spice} onChange={e=>setPrefs({...prefs, spice:e.target.value})} className="inp">
+                      <option value="mild">mild</option>
+                      <option value="medium">medium</option>
+                      <option value="hot">hot</option>
+                    </select>
+                  </div>
+
+                  <div className="col-span-2">
+                    <label className="lbl">Allergies</label>
+                    <MultiTag value={prefs.allergies} onChange={arr=>setPrefs({...prefs, allergies: arr})} options={["peanut","nuts","gluten","dairy","egg","shellfish"]} />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="lbl">Dislikes (ingredients)</label>
+                    <TagInput value={prefs.dislikes} onChange={arr=>setPrefs({...prefs, dislikes: arr})} placeholder="e.g., mushrooms, olives" />
+                  </div>
+                  <div>
+                    <label className="lbl">Time per meal (min)</label>
+                    <input type="number" min="10" max="120" value={prefs.timePerMeal} onChange={e=>setPrefs({...prefs, timePerMeal: +e.target.value})} className="inp"/>
+                  </div>
+
+                  <div>
+                    <label className="lbl">Currency</label>
+                    <select value={prefs.currency} onChange={e=>setPrefs({...prefs, currency: e.target.value})} className="inp">
+                      <option value="NGN">NGN (₦)</option>
+                      <option value="USD">USD ($)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="lbl">FX (₦ per $)</label>
+                    <input type="number" min="100" value={prefs.fxNgnPerUsd} onChange={e=>setPrefs({...prefs, fxNgnPerUsd: +e.target.value})} className="inp"/>
+                  </div>
+
+                  <div className="col-span-2">
+                    <label className="lbl">Budget/day ({prefs.currency==='NGN' ? '₦' : '$'})</label>
+                    <input type="number" min="0" value={prefs.budgetPerDay} onChange={e=>setPrefs({...prefs, budgetPerDay: +e.target.value})} className="inp"/>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2 mt-4">
+                  <button className="btn" onClick={()=>{ setDaysCount(1); generatePlan(1); }}>Generate daily plan</button>
+                  <button className="btn" onClick={()=>{ setDaysCount(7); generatePlan(7); }}>Generate weekly plan</button>
+                </div>
+                <p className="text-xs text-neutral-500 mt-2">Note: Prices are rough estimates (editable FX). You can modify lookups in code for your local market.</p>
+              </Card>
+
+              <Card className={view!=="chat"?"opacity-60":""}>
+                <div className="h-72 overflow-auto flex flex-col gap-3 pr-1">
+                  {messages.map((m, i) => (
+                    <div key={i} className={"p-3 rounded-2xl shadow-sm " + (m.role==='assistant' ? "bg-white" : "bg-neutral-100 ml-6")}>
+                      <p className="whitespace-pre-line text-sm leading-6">{m.text}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{ if(e.key==='Enter') handleSend(); }} className="flex-1 inp" placeholder="Type a message… (e.g., ‘family of 5, halal, ₦15000/day, 30 min dinners’)"/>
+                  <button className="btn" onClick={handleSend}>Send</button>
+                </div>
+              </Card>
+            </section>
+
+            {/* Right: Plan & Shopping */}
+            <section className="lg:col-span-2 space-y-4">
+              <Card>
+                <div className="flex items-baseline justify-between flex-wrap gap-2">
+                  <h2 className="text-lg font-semibold">{daysCount===1?"Today\u2019s Menu":"Weekly Menu"}</h2>
+                  {weekPlan && (
+                    <div className="text-sm text-neutral-700 flex items-center gap-3">
+                      <span className="px-2 py-0.5 rounded-full bg-neutral-100 border">
+                        Avg est. cost/day: {prefs.currency==='NGN' ? ngnToDisplay(avgDayCostNgn, prefs.fxNgnPerUsd) : "$"+(avgDayCostNgn/prefs.fxNgnPerUsd).toFixed(2)}
+                      </span>
+                      {prefs.budgetPerDay ? (
+                        <span className={"px-2 py-0.5 rounded-full border " + ((overBudget||overBudgetUsd) ? "bg-red-100 border-red-300 text-red-700" : "bg-green-100 border-green-300 text-green-700")}>
+                          { (overBudget||overBudgetUsd) ? "Above budget" : "Within budget" }
+                        </span>
+                      ) : null}
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <button disabled={!weekPlan} className="btn" onClick={()=>{ if(!weekPlan) return; const list = buildShoppingList(weekPlan); downloadList(list); }}>Download shopping list</button>
+                    <button disabled={!weekPlan} className="btn" onClick={()=> generatePlan(daysCount)}>Regenerate</button>
+                  </div>
+                </div>
+
+                {!weekPlan && (
+                  <p className="text-sm text-neutral-600 mt-2">No plan yet. Use <span className="font-medium">Generate</span> to create a menu based on your preferences.</p>
+                )}
+
+                {weekPlan && (
+                  <div className="mt-4 space-y-5">
+                    {weekPlan.map((d, idx) => (
+                      <div key={idx} className="rounded-2xl border border-neutral-200 p-3">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <h3 className="font-semibold">Day {idx+1}</h3>
+                          <div className="text-sm text-neutral-600 flex items-center gap-3">
+                            <span>~{Math.round(d.totals.kcal)} kcal • P{Math.round(d.totals.p)} C{Math.round(d.totals.c)} F{Math.round(d.totals.f)}</span>
+                            <span className="px-2 py-0.5 rounded-full bg-neutral-100 border text-neutral-700">
+                              Day est.: {ngnToDisplay(d.costNgn, prefs.fxNgnPerUsd)} ({ "$"+(d.costNgn/prefs.fxNgnPerUsd).toFixed(2) })
+                            </span>
+                          </div>
+                        </div>
+                        <div className="grid md:grid-cols-2 gap-3 mt-3">
+                          {(["breakfast","lunch","dinner","snack"]).map((t) => (
+                            <MealCard key={t} type={t} recipe={d.meals[t]} onSwap={() => onSwapMeal(idx, t)} />
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+
+                    {planTotals && weekPlan.length>1 && (
+                      <div className="rounded-2xl bg-neutral-100 p-4 text-sm">
+                        <div className="font-semibold mb-1">Week nutrition totals (recipes as written; costs scaled to family size)</div>
+                        <div>{Math.round(planTotals.kcal)} kcal • Protein {Math.round(planTotals.p)}g • Carbs {Math.round(planTotals.c)}g • Fat {Math.round(planTotals.f)}g</div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </Card>
+
+              <Card>
+                <div className="flex items-baseline justify-between">
+                  <h2 className="text-lg font-semibold">Family Shopping List</h2>
+                  <button disabled={!weekPlan} className="btn" onClick={()=>downloadList(list)}>Download</button>
+                </div>
+                {!weekPlan && <p className="text-sm text-neutral-600 mt-2">Generate a plan to see the shopping list.</p>}
+                {weekPlan && (
+                  <ul className="mt-3 grid sm:grid-cols-2 gap-x-6 gap-y-1 text-sm">
+                    {list.map((i, idx) => (
+                      <li key={idx} className="flex items-center justify-between border-b border-neutral-100 py-1">
+                        <span>{i.name}</span>
+                        <span className="tabular-nums text-neutral-700">{i.qty} {i.unit}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Card>
+            </section>
+          </main>
+
+          <footer className="max-w-6xl mx-auto px-4 pb-8 text-xs text-neutral-500">
+            Tip: Toggle <span className="font-medium">African focus</span>, <span className="font-medium">Kid-friendly</span>, and set a <span className="font-medium">Budget/day</span>. Costs are rough/adjustable; update the price table in code for your market.
+          </footer>
+        </div>
+      );
+      
+      // ---------- Components ----------
+      function Card({ children, className="" }) {
+        return <div className={"bg-white rounded-2xl shadow-sm border border-neutral-200 p-4 "+className}>{children}</div>;
+      }
+      function Toggle({ checked, onChange }) {
+        return (
+          <button onClick={()=>onChange(!checked)} className={"px-3 py-1.5 rounded-full border text-sm "+(checked?"bg-neutral-900 text-white border-neutral-900":"bg-white border-neutral-300 hover:bg-neutral-50")}>
+            {checked ? "On" : "Off"}
+          </button>
+        );
+      }
+      function MealCard({ type, recipe, onSwap }) {
+        if (!recipe) return null;
+        return (
+          <div className="rounded-xl border border-neutral-200 p-3">
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <div className="uppercase tracking-wide text-[11px] text-neutral-500">{type}</div>
+                <div className="font-semibold">{recipe.name}</div>
+              </div>
+              <button className="text-sm underline" onClick={onSwap}>Swap</button>
+            </div>
+            <div className="text-xs text-neutral-600">~{estimateTime(recipe)} min • {Math.round(recipe.kcal)} kcal • P{recipe.protein} C{recipe.carbs} F{recipe.fat}</div>
+            <details className="mt-2">
+              <summary className="cursor-pointer text-sm text-neutral-800">Ingredients</summary>
+              <ul className="mt-1 text-sm list-disc ml-5">
+                {recipe.ingredients.map((i, idx)=>(<li key={idx}>{i.qty} {i.unit} {i.name}</li>))}
+              </ul>
+            </details>
+            <details className="mt-2">
+              <summary className="cursor-pointer text-sm text-neutral-800">Steps</summary>
+              <ol className="mt-1 text-sm list-decimal ml-5">
+                {recipe.steps.map((s, idx)=>(<li key={idx}>{s}</li>))}
+              </ol>
+            </details>
+          </div>
+        );
+      }
+      function TagInput({ value, onChange, placeholder }) {
+        const [text, setText] = useState("");
+        function addTag() { const t = text.trim(); if (!t) return; onChange(uniq([...(value||[]), t])); setText(""); }
+        function removeTag(t) { onChange((value||[]).filter(x=>x!==t)); }
+        return (
+          <div>
+            <div className="flex flex-wrap gap-2 mb-2">
+              {(value||[]).map(t => (
+                <span key={t} className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-neutral-100 border border-neutral-200 text-xs">
+                  {t}
+                  <button onClick={()=>removeTag(t)} className="-mr-1 text-neutral-500">×</button>
+                </span>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <input className="inp flex-1" placeholder={placeholder} value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=>{ if(e.key==='Enter') addTag(); }} />
+              <button className="btn" onClick={addTag}>Add</button>
+            </div>
+          </div>
+        );
+      }
+      function MultiTag({ value, onChange, options }) {
+        function toggle(v) {
+          const set = new Set(value||[]);
+          set.has(v) ? set.delete(v) : set.add(v);
+          onChange(Array.from(set));
+        }
+        return (
+          <div className="flex flex-wrap gap-2">
+            {options.map(o => (
+              <button key={o} className={"px-3 py-1 rounded-full border text-sm "+((value||[]).includes(o)?"bg-neutral-900 text-white border-neutral-900":"bg-white border-neutral-300 hover:bg-neutral-50")} onClick={()=>toggle(o)}>{o}</button>
+            ))}
+          </div>
+        );
+      }
+      function tabBtn(active) {
+        return "px-3 py-1.5 rounded-full text-sm border "+(active?"bg-neutral-900 text-white border-neutral-900":"bg-white border-neutral-300 hover:bg-neutral-50");
+      }
+
+      // Tailwind helpers used in classNames (for reference)
+      // .btn, .inp, .lbl are virtual; we applied raw classes directly for portability.
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<FamilyMealPlannerChatbot />);
+  </script>
+</body>
+</html>
